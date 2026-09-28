@@ -49,7 +49,9 @@ class OpenAIRunner:
     def _client(self):
         from openai import OpenAI
 
-        return OpenAI(**(self.client_kwargs or {}))
+        kwargs = dict(self.client_kwargs or {})
+        kwargs.setdefault("timeout", 30.0)
+        return OpenAI(**kwargs)
 
     async def chat(self, agent: OpenAIAgent, user_message: str) -> str:
         for hook in self.input_hooks:
@@ -62,15 +64,33 @@ class OpenAIRunner:
             return block_msg
 
         client = self._client()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": agent.instruction},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-        )
-        text = (completion.choices[0].message.content or "").strip()
+        text = ""
+        for attempt in range(3):
+            try:
+                completion = client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": agent.instruction},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=self.temperature,
+                )
+                if completion and completion.choices:
+                    choice = completion.choices[0]
+                    msg = getattr(choice, "message", None)
+                    if msg:
+                        text = getattr(msg, "content", None) or getattr(msg, "refusal", None) or ""
+                    else:
+                        text = getattr(choice, "text", "") or ""
+                break
+            except Exception as e:
+                if attempt < 2 and any(err in str(e) for err in ("503", "429", "RESOURCE_EXHAUSTED", "UNAVAILABLE")):
+                    import time
+                    time.sleep(2)
+                    continue
+                raise
+
+        text = text.strip() if text else ""
 
         for hook in self.output_hooks:
             text = hook(text)

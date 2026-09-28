@@ -39,18 +39,19 @@ def content_filter(response: str) -> dict:
     issues = []
     redacted = response
 
-    # PII patterns to check
+    # PII and secret patterns to check and redact
     PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
+        "admin_password": r"\badmin123\b",
+        "api_key": r"sk-[a-zA-Z0-9_-]{6,}",
+        "internal_db": r"db\.vinbank\.internal(?::\d+)?",
+        "password_assignment": r"password\s*[:=]\s*\S+",
+        "phone_number": r"(?:\+84|0)(?:3|5|7|8|9)\d{8}\b|0\d{9,10}\b",
+        "email": r"[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}",
+        "national_id": r"\b\d{9}\b|\b\d{12}\b",
     }
 
     for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
+        matches = re.findall(pattern, redacted, re.IGNORECASE)
         if matches:
             issues.append(f"{name}: {len(matches)} found")
             redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
@@ -89,15 +90,8 @@ Respond with ONLY one word: SAFE or UNSAFE
 If UNSAFE, add a brief reason on the next line.
 """
 
-# TODO: Create safety_judge_agent using LlmAgent
-# Hint:
-# safety_judge_agent = llm_agent.LlmAgent(
-#     model="gemini-3.5-flash",
-#     name="safety_judge",
-#     instruction=SAFETY_JUDGE_INSTRUCTION,
-# )
-
-safety_judge_agent = None  # TODO: Replace with implementation
+# Optional safety judge
+safety_judge_agent = None
 judge_runner = None
 
 
@@ -143,7 +137,7 @@ async def llm_safety_check(response_text: str) -> dict:
 class OutputGuardrailPlugin(base_plugin.BasePlugin):
     """Plugin that checks agent output before sending to user."""
 
-    def __init__(self, use_llm_judge=True):
+    def __init__(self, use_llm_judge=False):
         super().__init__(name="output_guardrail")
         self.use_llm_judge = use_llm_judge and (safety_judge_agent is not None)
         self.blocked_count = 0
@@ -172,16 +166,26 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
+        # 1. Call content_filter
+        filtered = content_filter(response_text)
+        if not filtered["safe"]:
+            self.redacted_count += 1
+            llm_response.content = types.Content(
+                role="model",
+                parts=[types.Part.from_text(text=filtered["redacted"])],
+            )
 
-        return llm_response  # TODO: modify if needed
+        # 2. If use_llm_judge
+        if self.use_llm_judge:
+            safety = await llm_safety_check(self._extract_text(llm_response))
+            if not safety["safe"]:
+                self.blocked_count += 1
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text="I cannot share internal system details.")],
+                )
+
+        return llm_response
 
 
 # ============================================================

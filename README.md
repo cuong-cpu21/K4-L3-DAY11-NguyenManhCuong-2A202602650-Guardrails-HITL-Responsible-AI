@@ -59,8 +59,10 @@
 
 Codelab lớp: xem `template-codelabs/codelab-day11-k4-l3a.md` (L3A) hoặc bản L3B tương ứng.
 
-**Repo nộp học viên:** `K4-L3-DAY11-<HoVaTen>-<MSSV>-Guardrails-HITL-Responsible-AI`  
-Ví dụ: `K4-L3-DAY11-NguyenVanA-2A2026xxxxx-Guardrails-HITL-Responsible-AI`
+### Thông tin sinh viên & Repo nộp bài
+- **Họ và tên:** Nguyễn Mạnh Cường
+- **MSSV:** 2A202602650
+- **Repo nộp:** [`K4-L3-DAY11-NguyenManhCuong-2A202602650-Guardrails-HITL-Responsible-AI`](https://github.com/cuong-cpu21/K4-L3-DAY11-NguyenManhCuong-2A202602650-Guardrails-HITL-Responsible-AI)
 
 ---
 

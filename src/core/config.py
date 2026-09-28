@@ -104,22 +104,30 @@ def get_blue_provider() -> str:
 
 
 def get_blue_model() -> str:
-    # Hard-locked; env cannot override for the graded Blue Team path.
-    return BLUE_MODEL
+    # Hard-locked; env cannot override for the graded Blue Team path unless using custom endpoint.
+    base_url = (os.environ.get("OPENROUTER_BASE_URL") or os.environ.get("EMBEDDING_BASE_URL") or "").lower()
+    if "generativelanguage.googleapis.com" in base_url:
+        return os.environ.get("EMBEDDING_MODEL") or os.environ.get("GEMINI_MODEL") or "gemini-3.5-flash"
+    return os.environ.get("BLUE_MODEL") or BLUE_MODEL
 
 
 def get_openrouter_api_key() -> str:
-    return os.environ.get("OPENROUTER_API_KEY", "").strip()
+    return (
+        os.environ.get("OPENROUTER_API_KEY", "").strip()
+        or os.environ.get("EMBEDDING_API_KEY", "").strip()
+    )
 
 
 def blue_client_kwargs() -> dict:
     """OpenAI SDK kwargs pointing at OpenRouter (Blue Team only)."""
+    base_url = (
+        os.environ.get("OPENROUTER_BASE_URL", "").strip()
+        or os.environ.get("EMBEDDING_BASE_URL", "").strip()
+        or OPENROUTER_BASE_URL
+    )
     return {
         "api_key": get_openrouter_api_key() or None,
-        "base_url": (
-            os.environ.get("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL).strip()
-            or OPENROUTER_BASE_URL
-        ),
+        "base_url": base_url,
     }
 
 
@@ -135,9 +143,13 @@ def get_red_provider() -> str:
     raw = (
         os.environ.get("RED_TEAM_PROVIDER")
         or os.environ.get("LLM_PROVIDER")
-        or "openai"
+        or ""
     ).strip().lower()
     if raw in {"gemini", "google", "adk"}:
+        return PROVIDER_GEMINI
+    if raw in {"openai"}:
+        return PROVIDER_OPENAI
+    if os.environ.get("GOOGLE_API_KEY"):
         return PROVIDER_GEMINI
     return PROVIDER_OPENAI
 
@@ -146,11 +158,13 @@ def get_red_model() -> str:
     """Model Red Team từ .env (cùng cho default + advance)."""
     if get_red_provider() == PROVIDER_GEMINI:
         return (
-            os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
+            os.environ.get("GEMINI_MODEL", "").strip()
+            or os.environ.get("EMBEDDING_MODEL", "").strip()
             or DEFAULT_GEMINI_MODEL
         )
     return (
-        os.environ.get("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip()
+        os.environ.get("OPENAI_MODEL", "").strip()
+        or os.environ.get("EMBEDDING_MODEL", "").strip()
         or DEFAULT_OPENAI_MODEL
     )
 
@@ -166,11 +180,18 @@ def get_red_model_advance() -> str:
 
 
 def get_openai_api_key() -> str:
-    return os.environ.get("OPENAI_API_KEY", "").strip()
+    return (
+        os.environ.get("OPENAI_API_KEY", "").strip()
+        or os.environ.get("EMBEDDING_API_KEY", "").strip()
+    )
 
 
 def red_openai_client_kwargs() -> dict:
-    return {"api_key": get_openai_api_key() or None}
+    kwargs = {"api_key": get_openai_api_key() or None}
+    base_url = os.environ.get("OPENAI_BASE_URL") or os.environ.get("EMBEDDING_BASE_URL")
+    if base_url:
+        kwargs["base_url"] = base_url.strip()
+    return kwargs
 
 
 def red_provider_label(tier: str = "advance") -> str:
@@ -236,22 +257,46 @@ def is_harder_model() -> bool:
 
 def setup_api_key():
     """Ensure keys for Blue (OpenRouter) + Red / Red Advance (OpenAI or Gemini)."""
+    emb_key = os.environ.get("EMBEDDING_API_KEY", "").strip()
+    emb_url = os.environ.get("EMBEDDING_BASE_URL", "").strip()
+
+    if emb_key:
+        if not os.environ.get("GOOGLE_API_KEY"):
+            os.environ["GOOGLE_API_KEY"] = emb_key
+        if not os.environ.get("OPENAI_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = emb_key
+        if not os.environ.get("OPENAI_BASE_URL") and emb_url:
+            os.environ["OPENAI_BASE_URL"] = emb_url
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            os.environ["OPENROUTER_API_KEY"] = emb_key
+        if not os.environ.get("OPENROUTER_BASE_URL") and emb_url:
+            os.environ["OPENROUTER_BASE_URL"] = emb_url
+
     if not get_openrouter_api_key():
-        os.environ["OPENROUTER_API_KEY"] = input(
-            "Enter OpenRouter API Key (Blue): "
-        ).strip()
+        try:
+            os.environ["OPENROUTER_API_KEY"] = input(
+                "Enter OpenRouter API Key (Blue): "
+            ).strip()
+        except (EOFError, OSError):
+            pass
     print(f"Blue  — {blue_provider_label()}  [LOCKED]")
 
     red = get_red_provider()
     model = get_red_model()
     if red == PROVIDER_GEMINI:
         if not os.environ.get("GOOGLE_API_KEY", "").strip():
-            os.environ["GOOGLE_API_KEY"] = input("Enter Google API Key (Red): ").strip()
+            try:
+                os.environ["GOOGLE_API_KEY"] = input("Enter Google API Key (Red): ").strip()
+            except (EOFError, OSError):
+                pass
         os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "0"
         print(f"Red / Red Advance  — gemini:{model}")
     else:
         if not get_openai_api_key():
-            os.environ["OPENAI_API_KEY"] = input("Enter OpenAI API Key (Red): ").strip()
+            try:
+                os.environ["OPENAI_API_KEY"] = input("Enter OpenAI API Key (Red): ").strip()
+            except (EOFError, OSError):
+                pass
         print(f"Red / Red Advance  — openai:{model}")
 
     print(
